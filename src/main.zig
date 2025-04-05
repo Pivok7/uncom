@@ -5,6 +5,7 @@ const Flags = packed struct{
     remove: bool = false,
     force: bool = false,
     quiet: bool = false,
+    local: bool = false,
 };
 
 pub fn main() !void {
@@ -27,6 +28,23 @@ pub fn main() !void {
     var input_file_or_null: ?[]const u8 = null;
 
     for (args[1..]) |arg| {
+        if (std.mem.startsWith(u8, arg, "-")) {
+            for (arg) |char| {
+                switch (char) {
+                    '-' => continue,
+                    'r' => flags.remove = true,
+                    'f' => flags.force = true,
+                    'q' => flags.quiet = true,
+                    'l' => flags.local = true,
+                    else => {
+                        std.log.err("Invalid flag \"{c}\"", .{char});
+                        std.process.exit(2);
+                    }
+                }
+            }
+            continue;
+        }
+
         if (std.mem.eql(u8, arg, "-h") or std.mem.eql(u8, arg, "--help")) {
             printHelp();
             std.process.exit(0);
@@ -39,6 +57,9 @@ pub fn main() !void {
         } else if (std.mem.eql(u8, arg, "-q") or std.mem.eql(u8, arg, "--quiet")) {
             flags.quiet = true;
             continue;
+        } else if (std.mem.eql(u8, arg, "-l") or std.mem.eql(u8, arg, "--local")) {
+            flags.local = true;
+            continue;
         } else {
             input_file_or_null = arg;
             continue;
@@ -46,14 +67,15 @@ pub fn main() !void {
     }
 
     const input_file = input_file_or_null orelse {
-        std.debug.print("No input file!\n", .{});
+        std.log.err("No input file!", .{});
         std.process.exit(2);
     };
 
     if (!try fileExists(input_file)) {
-        std.debug.print("File \"{s}\" does not exist!\n", .{input_file});
+        std.log.err("File \"{s}\" does not exist!", .{input_file});
         std.process.exit(1);
     }
+    
 
     var command = std.ArrayList([]const u8).init(allocator);
     defer command.deinit();
@@ -68,12 +90,18 @@ pub fn main() !void {
         if (flags.quiet) try command.append("-q");
         try command.append(full_file_path);
 
-        std.debug.print("Working...\n", .{});
+        if (!flags.local) {
+            const output_dir_path = full_file_path[0..std.mem.lastIndexOf(u8, full_file_path, ".zip").?];
+            try command.append("-d");
+            try command.append(output_dir_path);
+        }
+
+        if (!flags.quiet) std.debug.print("Working...\n", .{});
         try runCommand(allocator, command.items);
 
         if (flags.remove) {
             try std.fs.cwd().deleteFile(full_file_path);
-            std.debug.print("Removed: {s}\n", .{input_file});
+            if (!flags.quiet) std.debug.print("Removed: {s}\n", .{input_file});
         }
     // 7z
     } else if (std.mem.endsWith(u8, input_file, ".7z")) {
@@ -86,61 +114,71 @@ pub fn main() !void {
         var output_dir = std.ArrayList(u8).init(allocator);
         defer output_dir.deinit();
 
-        try output_dir.appendSlice("-o");
-        try output_dir.appendSlice(full_file_path[0..std.mem.lastIndexOf(u8, full_file_path, ".7z").?]);
+        if (!flags.local) {
+            try output_dir.appendSlice("-o");
+            try output_dir.appendSlice(full_file_path[0..std.mem.lastIndexOf(u8, full_file_path, ".7z").?]);
+        }
 
         try command.append(output_dir.items);
 
-        std.debug.print("Working...\n", .{});
+        if (!flags.quiet) std.debug.print("Working...\n", .{});
         try runCommand(allocator, command.items);
 
         if (flags.remove) {
             try std.fs.cwd().deleteFile(full_file_path);
-            std.debug.print("Removed: {s}\n", .{input_file});
+            if (!flags.quiet) std.debug.print("Removed: {s}\n", .{input_file});
         }
-    // Tar
-    } else if (std.mem.endsWith(u8, input_file, ".tar.gz")) {
+    // Tar gz
+    } else if (std.mem.endsWith(u8, input_file, ".tar.gz") or (std.mem.endsWith(u8, input_file, "tar.xz"))) {
         try command.append("tar");
-        try command.append("-xzf");
+
+        if (std.mem.endsWith(u8, input_file, "xz")) {
+            try command.append("-xf");
+        } else {
+            try command.append("-xzf");
+        }
+
         try command.append(full_file_path);
 
-        const output_dir_path = full_file_path[0..std.mem.lastIndexOf(u8, full_file_path, ".tar.gz").?];
+        const output_dir_path = full_file_path[0..std.mem.lastIndexOf(u8, full_file_path, ".tar.").?];
 
-        if (flags.force) try std.fs.cwd().deleteTree(output_dir_path);
+        if (!flags.local) {
+            if (flags.force) try std.fs.cwd().deleteTree(output_dir_path);
 
-        if (try fileExists(output_dir_path)) {
-            std.debug.print("Directory already exists. Override? [y/N] ", .{});
+            if (try fileExists(output_dir_path)) {
+                std.debug.print("Directory already exists. Override? [y/N] ", .{});
 
-            const user_input = (try stdin.readUntilDelimiterOrEofAlloc(allocator, '\n', 1024)).?;
-            defer allocator.free(user_input);
+                const user_input = (try stdin.readUntilDelimiterOrEofAlloc(allocator, '\n', 1024)).?;
+                defer allocator.free(user_input);
 
-            if (std.mem.eql(u8, user_input, "y") or std.mem.eql(u8, user_input, "Y")) {
-                try std.fs.cwd().deleteTree(output_dir_path);
-                try std.fs.cwd().makeDir(output_dir_path);
+                if (std.mem.eql(u8, user_input, "y") or std.mem.eql(u8, user_input, "Y")) {
+                    try std.fs.cwd().deleteTree(output_dir_path);
+                    try std.fs.cwd().makeDir(output_dir_path);
+                } else {
+                    std.debug.print("Exiting...\n", .{});
+                    std.process.exit(0);
+                }
             } else {
-                std.debug.print("Exiting...\n", .{});
-                std.process.exit(0);
+                try std.fs.cwd().makeDir(output_dir_path);
             }
-        } else {
-            try std.fs.cwd().makeDir(output_dir_path);
+
+            try command.append("-C");
+            try command.append(output_dir_path);
         }
 
-        try command.append("-C");
-        try command.append(output_dir_path);
-
-        std.debug.print("Working...\n", .{});
+        if (!flags.quiet) std.debug.print("Working...\n", .{});
         try runCommand(allocator, command.items);
 
         if (flags.remove) {
             try std.fs.cwd().deleteFile(full_file_path);
-            std.debug.print("Removed: {s}\n", .{input_file});
+            if (!flags.quiet) std.debug.print("Removed: {s}\n", .{input_file});
         }
     } else {
         std.debug.print("File type not supported\n", .{});
         std.process.exit(1);
     }
 
-    std.debug.print("Done!\n", .{});
+    if (!flags.quiet) std.debug.print("Done!\n", .{});
 }
 
 fn runCommand(allocator: Allocator, command: []const []const u8) !void {
@@ -170,6 +208,7 @@ fn printHelp() void {
     std.debug.print("-r     --remove     Remove archive when finished\n", .{});
     std.debug.print("-f     --force      Force override output directory\n", .{});
     std.debug.print("-q     --quiet      Minimize displayed info\n", .{});
+    std.debug.print("-l     --local      Unpack all files to this folder\n", .{});
 }
 
 fn fileExists(file_path: []const u8) !bool {
