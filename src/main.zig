@@ -28,23 +28,6 @@ pub fn main() !void {
     var input_file_or_null: ?[]const u8 = null;
 
     for (args[1..]) |arg| {
-        if (std.mem.startsWith(u8, arg, "-")) {
-            for (arg) |char| {
-                switch (char) {
-                    '-' => continue,
-                    'r' => flags.remove = true,
-                    'f' => flags.force = true,
-                    'q' => flags.quiet = true,
-                    'l' => flags.local = true,
-                    else => {
-                        std.log.err("Invalid flag \"{c}\"", .{char});
-                        std.process.exit(2);
-                    }
-                }
-            }
-            continue;
-        }
-
         if (std.mem.eql(u8, arg, "-h") or std.mem.eql(u8, arg, "--help")) {
             printHelp();
             std.process.exit(0);
@@ -60,7 +43,23 @@ pub fn main() !void {
         } else if (std.mem.eql(u8, arg, "-l") or std.mem.eql(u8, arg, "--local")) {
             flags.local = true;
             continue;
-        } else {
+        } else if (std.mem.startsWith(u8, arg, "-")) {
+            for (arg) |char| {
+                switch (char) {
+                    '-' => continue,
+                    'r' => flags.remove = true,
+                    'f' => flags.force = true,
+                    'q' => flags.quiet = true,
+                    'l' => flags.local = true,
+                    else => {
+                        std.log.err("Invalid flag \"{c}\"", .{char});
+                        std.process.exit(2);
+                    }
+                }
+            }
+            continue;
+        }
+        else {
             input_file_or_null = arg;
             continue;
         }
