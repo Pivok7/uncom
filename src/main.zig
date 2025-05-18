@@ -11,7 +11,7 @@ const Flags = packed struct{
 pub fn main() !void {
     const stdin = std.io.getStdIn().reader();
 
-    var gpa = std.heap.GeneralPurposeAllocator(.{ .safety = false }){};
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const allocator = gpa.allocator();
     defer _ = gpa.deinit();
 
