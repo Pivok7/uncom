@@ -128,14 +128,13 @@ pub fn main() !void {
             if (!flags.quiet) std.debug.print("Removed: {s}\n", .{input_file});
         }
     // Tar gz
-    } else if (std.mem.endsWith(u8, input_file, ".tar.gz") or (std.mem.endsWith(u8, input_file, "tar.xz"))) {
+    } else if (
+        std.mem.endsWith(u8, input_file, ".tar.gz") or
+        std.mem.endsWith(u8, input_file, "tar.xz") or
+        std.mem.endsWith(u8, input_file, "tar.bz2")
+    ) {
         try command.append("tar");
-
-        if (std.mem.endsWith(u8, input_file, "xz")) {
-            try command.append("-xf");
-        } else {
-            try command.append("-xzf");
-        }
+        try command.append("-xf");
 
         try command.append(full_file_path);
 
