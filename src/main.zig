@@ -74,7 +74,6 @@ pub fn main() !void {
         std.log.err("File \"{s}\" does not exist!", .{input_file});
         std.process.exit(1);
     }
-    
 
     var command = std.ArrayList([]const u8).init(allocator);
     defer command.deinit();

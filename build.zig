@@ -11,7 +11,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
         .strip = optimize != .Debug,
     });
-    
+
     b.installArtifact(exe);
 
     // Run step
