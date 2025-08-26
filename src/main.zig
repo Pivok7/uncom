@@ -8,9 +8,27 @@ const Flags = packed struct{
     local: bool = false,
 };
 
-pub fn main() !void {
-    const stdin = std.io.getStdIn().reader();
+fn stdinReadUntilDeliminerAlloc(allocator: Allocator, deliminer: u8) ![]const u8 {
+    var stdin_buf: [1]u8 = undefined;
+    var stdin = std.fs.File.stdin().reader(&stdin_buf);
 
+    var arr = std.ArrayList(u8){};
+    defer arr.deinit(allocator);
+
+    while (true) {
+        const read = try stdin.interface.takeByte();
+
+        if (read != deliminer) {
+            try arr.append(allocator, read);
+        } else {
+            break;
+        }
+    }
+
+    return try arr.toOwnedSlice(allocator);
+}
+
+pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const allocator = gpa.allocator();
     defer _ = gpa.deinit();
@@ -75,23 +93,23 @@ pub fn main() !void {
         std.process.exit(1);
     }
 
-    var command = std.ArrayList([]const u8).init(allocator);
-    defer command.deinit();
+    var command = std.ArrayList([]const u8){};
+    defer command.deinit(allocator);
 
     const full_file_path = try std.fs.cwd().realpathAlloc(allocator, input_file);
     defer allocator.free(full_file_path);
 
     // Zip
     if (std.mem.endsWith(u8, input_file, ".zip")) {
-        try command.append("unzip");
-        if (flags.force) try command.append("-o");
-        if (flags.quiet) try command.append("-q");
-        try command.append(full_file_path);
+        try command.append(allocator, "unzip");
+        if (flags.force) try command.append(allocator, "-o");
+        if (flags.quiet) try command.append(allocator, "-q");
+        try command.append(allocator, full_file_path);
 
         if (!flags.local) {
             const output_dir_path = full_file_path[0..std.mem.lastIndexOf(u8, full_file_path, ".zip").?];
-            try command.append("-d");
-            try command.append(output_dir_path);
+            try command.append(allocator, "-d");
+            try command.append(allocator, output_dir_path);
         }
 
         if (!flags.quiet) std.debug.print("Working...\n", .{});
@@ -103,21 +121,24 @@ pub fn main() !void {
         }
     // 7z
     } else if (std.mem.endsWith(u8, input_file, ".7z")) {
-        try command.append("7z");
-        try command.append("x");
-        if (flags.force) try command.append("-aoa");
-        if (flags.quiet) try command.append("-bso0");
-        try command.append(full_file_path);
+        try command.append(allocator, "7z");
+        try command.append(allocator, "x");
+        if (flags.force) try command.append(allocator, "-aoa");
+        if (flags.quiet) try command.append(allocator, "-bso0");
+        try command.append(allocator, full_file_path);
 
-        var output_dir = std.ArrayList(u8).init(allocator);
-        defer output_dir.deinit();
+        var output_dir = std.ArrayList(u8){};
+        defer output_dir.deinit(allocator);
 
         if (!flags.local) {
-            try output_dir.appendSlice("-o");
-            try output_dir.appendSlice(full_file_path[0..std.mem.lastIndexOf(u8, full_file_path, ".7z").?]);
+            try output_dir.appendSlice(allocator, "-o");
+            try output_dir.appendSlice(
+                allocator,
+                full_file_path[0..std.mem.lastIndexOf(u8, full_file_path, ".7z").?]
+            );
         }
 
-        try command.append(output_dir.items);
+        try command.append(allocator, output_dir.items);
 
         if (!flags.quiet) std.debug.print("Working...\n", .{});
         try runCommand(allocator, command.items);
@@ -132,10 +153,10 @@ pub fn main() !void {
         std.mem.endsWith(u8, input_file, "tar.xz") or
         std.mem.endsWith(u8, input_file, "tar.bz2")
     ) {
-        try command.append("tar");
-        try command.append("-xf");
+        try command.append(allocator, "tar");
+        try command.append(allocator, "-xf");
 
-        try command.append(full_file_path);
+        try command.append(allocator, full_file_path);
 
         const output_dir_path = full_file_path[0..std.mem.lastIndexOf(u8, full_file_path, ".tar.").?];
 
@@ -145,7 +166,7 @@ pub fn main() !void {
             if (try fileExists(output_dir_path)) {
                 std.debug.print("Directory already exists. Override? [y/N] ", .{});
 
-                const user_input = (try stdin.readUntilDelimiterOrEofAlloc(allocator, '\n', 1024)).?;
+                const user_input = try stdinReadUntilDeliminerAlloc(allocator, '\n');
                 defer allocator.free(user_input);
 
                 if (std.mem.eql(u8, user_input, "y") or std.mem.eql(u8, user_input, "Y")) {
@@ -159,8 +180,8 @@ pub fn main() !void {
                 try std.fs.cwd().makeDir(output_dir_path);
             }
 
-            try command.append("-C");
-            try command.append(output_dir_path);
+            try command.append(allocator, "-C");
+            try command.append(allocator, output_dir_path);
         }
 
         if (!flags.quiet) std.debug.print("Working...\n", .{});
