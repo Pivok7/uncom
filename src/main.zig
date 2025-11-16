@@ -1,5 +1,5 @@
 const std = @import("std");
-const Allocator = std.mem.Allocator;
+    const Allocator = std.mem.Allocator;
 
 const Flags = packed struct{
     remove: bool = false,
@@ -142,11 +142,11 @@ pub fn main() !void {
             try std.fs.cwd().deleteFile(full_file_path);
             if (!flags.quiet) std.debug.print("Removed: {s}\n", .{input_file});
         }
-    // Tar gz
+    // Tar gz, xz and bz2
     } else if (
         std.mem.endsWith(u8, input_file, ".tar.gz") or
-        std.mem.endsWith(u8, input_file, "tar.xz") or
-        std.mem.endsWith(u8, input_file, "tar.bz2")
+        std.mem.endsWith(u8, input_file, ".tar.xz") or
+        std.mem.endsWith(u8, input_file, ".tar.bz2")
     ) {
         try command.append(allocator, "tar");
         try command.append(allocator, "-xf");
