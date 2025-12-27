@@ -25,7 +25,6 @@
         pkgs.mkShell {
           packages =
             (with pkgs; [
-	      nushell
               unzip
               xz
               bzip2
@@ -36,9 +35,7 @@
             ]);
 
           shellHook = ''
-            echo "nushell   `nu -v`"
             echo "zig       `zig version`"
-            exec nu --config ./config.nu
           '';
         };
     };
