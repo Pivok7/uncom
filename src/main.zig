@@ -221,7 +221,7 @@ fn printHelp() void {
     std.debug.print("-r     --remove     Remove archive when finished\n", .{});
     std.debug.print("-f     --force      Force override output directory\n", .{});
     std.debug.print("-q     --quiet      Minimize displayed info\n", .{});
-    std.debug.print("-l     --local      Unpack all files to this folder\n", .{});
+    std.debug.print("-l     --local      Unpack all files to this directory\n", .{});
 }
 
 fn fileExists(file_path: []const u8) !bool {
