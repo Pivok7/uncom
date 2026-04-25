@@ -1,37 +1,53 @@
 const std = @import("std");
-    const Allocator = std.mem.Allocator;
+const Allocator = std.mem.Allocator;
+const Io = std.Io;
+const cwd = std.Io.Dir.cwd;
 
-const Flags = packed struct{
+const io_buf_size = 1024;
+
+const Flags = packed struct {
     remove: bool = false,
     force: bool = false,
     quiet: bool = false,
     local: bool = false,
 };
 
-fn stdinReadUntilDeliminerAlloc(allocator: Allocator, deliminer: u8) ![]const u8 {
-    var stdin_buf: [1024]u8 = undefined;
-    var stdin = std.fs.File.stdin().reader(&stdin_buf);
+fn stdinReadUntilDeliminerAlloc(allocator: Allocator, io: Io, deliminer: u8) ![]const u8 {
+    var stdin_buf: [io_buf_size]u8 = undefined;
+    var stdin = Io.File.stdin().reader(io, &stdin_buf);
 
-    var alloc_writer = std.io.Writer.Allocating.init(allocator);
+    var alloc_writer = Io.Writer.Allocating.init(allocator);
 
-    _ = try stdin.interface.streamDelimiter(
-        &alloc_writer.writer,
-        deliminer
-    );
+    _ = try stdin.interface.streamDelimiter(&alloc_writer.writer, deliminer);
 
     return try alloc_writer.toOwnedSlice();
 }
 
+fn fileExists(io: Io, file_path: []const u8) !bool {
+    cwd().access(io, file_path, .{}) catch |err| switch (err) {
+        error.FileNotFound => return false,
+        else => return !false,
+    };
+    return true;
+}
 
-pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    const allocator = gpa.allocator();
-    defer _ = gpa.deinit();
+fn printHelp() void {
+    std.debug.print("Uncom - universal uncompressor\n", .{});
+    std.debug.print("How to use:\n", .{});
+    std.debug.print("uncom [file_path] [flags]\n", .{});
+    std.debug.print("-r     --remove     Remove archive when finished\n", .{});
+    std.debug.print("-f     --force      Force override output directory\n", .{});
+    std.debug.print("-q     --quiet      Minimize displayed info\n", .{});
+    std.debug.print("-l     --local      Unpack all files to this directory\n", .{});
+}
+
+pub fn main(init: std.process.Init) !void {
+    const allocator = init.gpa;
+    const io = init.io;
 
     var flags: Flags = .{};
 
-    const args = try std.process.argsAlloc(allocator);
-    errdefer std.process.argsFree(allocator, args);
+    const args = try init.minimal.args.toSlice(init.arena.allocator());
 
     if (args.len == 1) {
         printHelp();
@@ -67,12 +83,11 @@ pub fn main() !void {
                     else => {
                         std.log.err("Invalid flag \"{c}\"", .{char});
                         std.process.exit(2);
-                    }
+                    },
                 }
             }
             continue;
-        }
-        else {
+        } else {
             input_file_or_null = arg;
             continue;
         }
@@ -83,15 +98,15 @@ pub fn main() !void {
         std.process.exit(2);
     };
 
-    if (!try fileExists(input_file)) {
+    if (!try fileExists(io, input_file)) {
         std.log.err("File \"{s}\" does not exist!", .{input_file});
         std.process.exit(1);
     }
 
-    var command = std.ArrayList([]const u8){};
+    var command: std.ArrayList([]const u8) = .empty;
     defer command.deinit(allocator);
 
-    const full_file_path = try std.fs.cwd().realpathAlloc(allocator, input_file);
+    const full_file_path = try cwd().realPathFileAlloc(io, input_file, allocator);
     defer allocator.free(full_file_path);
 
     // Zip
@@ -108,13 +123,13 @@ pub fn main() !void {
         }
 
         if (!flags.quiet) std.debug.print("Working...\n", .{});
-        try runCommand(allocator, command.items);
+        try runCommand(allocator, io, command.items);
 
         if (flags.remove) {
-            try std.fs.cwd().deleteFile(full_file_path);
+            try cwd().deleteFile(io, full_file_path);
             if (!flags.quiet) std.debug.print("Removed: {s}\n", .{input_file});
         }
-    // 7z
+        // 7z
     } else if (std.mem.endsWith(u8, input_file, ".7z")) {
         try command.append(allocator, "7z");
         try command.append(allocator, "x");
@@ -122,32 +137,28 @@ pub fn main() !void {
         if (flags.quiet) try command.append(allocator, "-bso0");
         try command.append(allocator, full_file_path);
 
-        var output_dir = std.ArrayList(u8){};
+        var output_dir: std.ArrayList(u8) = .empty;
         defer output_dir.deinit(allocator);
 
         if (!flags.local) {
             try output_dir.appendSlice(allocator, "-o");
-            try output_dir.appendSlice(
-                allocator,
-                full_file_path[0..std.mem.lastIndexOf(u8, full_file_path, ".7z").?]
-            );
+            try output_dir.appendSlice(allocator, full_file_path[0..std.mem.lastIndexOf(u8, full_file_path, ".7z").?]);
         }
 
         try command.append(allocator, output_dir.items);
 
         if (!flags.quiet) std.debug.print("Working...\n", .{});
-        try runCommand(allocator, command.items);
+        try runCommand(allocator, io, command.items);
 
         if (flags.remove) {
-            try std.fs.cwd().deleteFile(full_file_path);
+            try cwd().deleteFile(io, full_file_path);
             if (!flags.quiet) std.debug.print("Removed: {s}\n", .{input_file});
         }
-    // Tar gz, xz and bz2
-    } else if (
-        std.mem.endsWith(u8, input_file, ".tar.gz") or
+        // Tar gz, xz and bz2
+    } else if (std.mem.endsWith(u8, input_file, ".tar.gz") or
         std.mem.endsWith(u8, input_file, ".tar.xz") or
-        std.mem.endsWith(u8, input_file, ".tar.bz2")
-    ) {
+        std.mem.endsWith(u8, input_file, ".tar.bz2"))
+    {
         try command.append(allocator, "tar");
         try command.append(allocator, "-xf");
 
@@ -156,23 +167,23 @@ pub fn main() !void {
         const output_dir_path = full_file_path[0..std.mem.lastIndexOf(u8, full_file_path, ".tar.").?];
 
         if (!flags.local) {
-            if (flags.force) try std.fs.cwd().deleteTree(output_dir_path);
+            if (flags.force) try cwd().deleteTree(io, output_dir_path);
 
-            if (try fileExists(output_dir_path)) {
+            if (try fileExists(io, output_dir_path)) {
                 std.debug.print("Directory already exists. Override? [y/N] ", .{});
 
-                const user_input = try stdinReadUntilDeliminerAlloc(allocator, '\n');
+                const user_input = try stdinReadUntilDeliminerAlloc(allocator, io, '\n');
                 defer allocator.free(user_input);
 
                 if (std.mem.eql(u8, user_input, "y") or std.mem.eql(u8, user_input, "Y")) {
-                    try std.fs.cwd().deleteTree(output_dir_path);
-                    try std.fs.cwd().makeDir(output_dir_path);
+                    try cwd().deleteTree(io, output_dir_path);
+                    try cwd().createDirPath(io, output_dir_path);
                 } else {
                     std.debug.print("Exiting...\n", .{});
                     std.process.exit(0);
                 }
             } else {
-                try std.fs.cwd().makeDir(output_dir_path);
+                try cwd().createDirPath(io, output_dir_path);
             }
 
             try command.append(allocator, "-C");
@@ -180,10 +191,10 @@ pub fn main() !void {
         }
 
         if (!flags.quiet) std.debug.print("Working...\n", .{});
-        try runCommand(allocator, command.items);
+        try runCommand(allocator, io, command.items);
 
         if (flags.remove) {
-            try std.fs.cwd().deleteFile(full_file_path);
+            try cwd().deleteFile(io, full_file_path);
             if (!flags.quiet) std.debug.print("Removed: {s}\n", .{input_file});
         }
     } else {
@@ -194,40 +205,27 @@ pub fn main() !void {
     if (!flags.quiet) std.debug.print("Done!\n", .{});
 }
 
-fn runCommand(allocator: Allocator, command: []const []const u8) !void {
-
+fn runCommand(allocator: Allocator, io: Io, command: []const []const u8) !void {
     // Initialize the child process
-    var child = std.process.Child.init(command, allocator);
-    _ = try child.spawn(); // Start the process
+    const result = try std.process.run(allocator, io, .{
+        .argv = command,
+    });
 
-    // Wait for the process to exit
-    const term = try child.wait();
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+
 
     // Check exit status
-    switch (term) {
-        .Exited => |code| {
+    switch (result.term) {
+        .exited => |code| {
             if (code != 0) {
-                std.debug.print("Command failed with exit code: {d}\n", .{code});
+                std.log.err("Command failed with exit code: {d}\n", .{code});
+                std.log.err("--- stdout ---\n", .{});
+                std.debug.print("{s}\n", .{result.stdout});
+                std.log.err("--- stderr ---\n", .{});
+                std.debug.print("{s}\n", .{result.stderr});
             }
         },
-        else => std.debug.print("Process terminated abnormally\n", .{}),
+        else => std.log.err("Process terminated abnormally\n", .{}),
     }
-}
-
-fn printHelp() void {
-    std.debug.print("Uncom - universal uncompressor\n", .{});
-    std.debug.print("How to use:\n", .{});
-    std.debug.print("uncom [file_path] [flags]\n", .{});
-    std.debug.print("-r     --remove     Remove archive when finished\n", .{});
-    std.debug.print("-f     --force      Force override output directory\n", .{});
-    std.debug.print("-q     --quiet      Minimize displayed info\n", .{});
-    std.debug.print("-l     --local      Unpack all files to this directory\n", .{});
-}
-
-fn fileExists(file_path: []const u8) !bool {
-    std.fs.cwd().access(file_path, .{}) catch |err| switch (err) {
-        error.FileNotFound => return false,
-        else => return !false,
-    };
-    return true;
 }
