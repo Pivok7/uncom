@@ -28,6 +28,8 @@ Tool for automatic decompression of common archives.
 uncom [PATH] [OPTIONS]
 ```
 
+One or more `PATH`s may be given; each is processed in turn.
+
 | Flag | Long | Description |
 |------|------|-------------|
 | `-r` | `--remove` | Remove archive when finished |
@@ -35,4 +37,4 @@ uncom [PATH] [OPTIONS]
 | `-q` | `--quiet` | Minimize displayed info |
 | `-l` | `--local` | Unpack all files to this directory |
 
-By default archives are extracted into a directory named after the archive (minus its extension).
+By default archives are extracted into a directory named after the archive (minus its extension). Options apply to every path given.
