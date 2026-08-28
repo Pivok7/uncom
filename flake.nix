@@ -25,6 +25,7 @@
             gzip
             p7zip
             zstd
+            lz4
           ];
         };
       }

@@ -81,7 +81,8 @@ def uncompress [
     ($p | str ends-with ".bz2") or
     ($p | str ends-with ".xz") or
     ($p | str ends-with ".lzma") or
-    ($p | str ends-with ".zst")
+    ($p | str ends-with ".zst") or
+    ($p | str ends-with ".lz4")
   ) {
     let tool = if ($p | str ends-with ".gz") {
       "gzip"
@@ -89,6 +90,8 @@ def uncompress [
       "bzip2"
     } else if (($p | str ends-with ".xz") or ($p | str ends-with ".lzma")) {
       "xz"
+    } else if ($p | str ends-with ".lz4") {
+      "lz4"
     } else {
       "zstd"
     };
@@ -113,8 +116,8 @@ def uncompress [
       run-external $command;
       ($env.LAST_EXIT_CODE == 0)
     } else {
-      let r = (run-external $command | complete | ignore);
-      ($env.LAST_EXIT_CODE == 0)
+      let r = (run-external $command | complete);
+      ($r.exit_code == 0)
     }
   } catch {
     false
