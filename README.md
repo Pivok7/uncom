@@ -1,4 +1,4 @@
-Tool for automatic decompression of archives. Supports:
+Tool for automatic decompression of common archives. Supports:
 - .zip
 - .7z
 - .tar.bz2

@@ -1,0 +1,162 @@
+#!/usr/bin/env nu
+
+let metadata = {
+  name: "uncom"
+  version: "2.0.0"
+};
+
+def uncompress [
+  p: path
+  --quiet (-q) = false
+  --force (-f) = false
+  --remove (-r) = false
+  --local (-l) = false
+] {
+  if not ($p | path exists) {
+    print $"File '($p)' not found";
+    return;
+  }
+
+  mut command = [];
+
+  if ($p | str ends-with ".zip") {
+    $command ++= ["unzip"];
+
+    let name = $p | path parse | get stem;
+
+    if $force { $command ++= ["-o"]; }
+
+    $command ++= [$p];
+
+    if not $local {
+      $command ++= ["-d"];
+      $command ++= [$name];
+    }
+
+  } else if (($p | str ends-with ".7z") or ($p | str ends-with ".rar")) {
+    $command ++= ["7z", "x"];
+
+    let name = $p | path parse | get stem;
+
+    if $force { $command ++= ["-y"]; }
+
+    $command ++= [$p];
+
+    if not $local {
+      $command ++= [$"-o($name)"];
+    }
+  } else if (
+    ($p | str ends-with ".tar.gz") or
+    ($p | str ends-with ".tar.bz2") or
+    ($p | str ends-with ".tar.xz") or
+    ($p | str ends-with ".tar.lzma") or
+    ($p | str ends-with ".tar.zst") or
+    ($p | str ends-with ".tar") or
+    ($p | str ends-with ".tgz") or
+    ($p | str ends-with ".tbz2") or
+    ($p | str ends-with ".tzst") or
+    ($p | str ends-with ".txz")
+  ) {
+    $command ++= ["tar", "xf"];
+
+    let name = if (
+      ($p | str ends-with ".tgz") or
+      ($p | str ends-with ".tbz2") or
+      ($p | str ends-with ".tzst") or
+      ($p | str ends-with ".txz")
+    ) {
+      $p | path parse | get stem
+    } else {
+      $p | str substring 0..<($p | str index-of ".tar" --end)
+    };
+
+    $command ++= [$p];
+
+    if not $local {
+      mkdir $name;
+      $command ++= ["-C", $name];
+    }
+  } else if (
+    ($p | str ends-with ".gz") or
+    ($p | str ends-with ".bz2") or
+    ($p | str ends-with ".xz") or
+    ($p | str ends-with ".lzma") or
+    ($p | str ends-with ".zst")
+  ) {
+    let tool = if ($p | str ends-with ".gz") {
+      "gzip"
+    } else if ($p | str ends-with ".bz2") {
+      "bzip2"
+    } else if (($p | str ends-with ".xz") or ($p | str ends-with ".lzma")) {
+      "xz"
+    } else {
+      "zstd"
+    };
+
+    $command ++= [$tool, "-d"];
+
+    if $force { $command ++= ["-f"]; }
+    if not $remove { $command ++= ["-k"]; }
+
+    $command ++= [$p];
+  }
+
+  if ($command | is-empty) {
+    print $"Unsupported format: ($p)";
+    return;
+  }
+
+  let ok = (try {
+    if not $quiet {
+      print ("> " + ($command | str join " "));
+      print "Working...";
+      run-external $command;
+      ($env.LAST_EXIT_CODE == 0)
+    } else {
+      let r = (run-external $command | complete | ignore);
+      ($env.LAST_EXIT_CODE == 0)
+    }
+  } catch {
+    false
+  });
+
+  if $remove and $ok {
+    rm $p;
+  }
+}
+
+def help [] {
+  print $"> ($metadata | get name) ($metadata | get version)"
+  print "Usage: uncom [PATH] [OPTIONS]"
+  print " -r\t--remove\tRemove archive when finished"
+  print " -f\t--force\t\tForce override output directory"
+  print " -q\t--quiet\t\tMinimize displayed info"
+  print " -l\t--local\t\tUnpack all files to this directory"
+}
+
+def --wrapped main [
+  ...args
+  --quiet (-q)
+  --force (-f)
+  --remove (-r)
+  --local (-l)
+] {
+  if ($args | is-empty) {
+    help;
+    exit;
+  }
+
+  let catch_flags = $args | where {|e| $e | str starts-with "-"};
+
+  if ($catch_flags | is-not-empty) {
+    print "Invalid flag(s):";
+    print $catch_flags;
+    exit 1;
+  }
+
+  let paths = ($args | where {|e| not ($e | str starts-with "-")});
+
+  for p in $paths {
+    uncompress $p --quiet=$quiet --force=$force --remove=$remove --local=$local
+  }
+}
